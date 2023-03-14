@@ -1,0 +1,263 @@
+HDBT2/TXT -- HDBOOT version 2      Adam Rubin [71320,1052], September 21, 1989
+
+Copyright (C) 1989 Adam Rubin.  All rights reserved.  This file may be redis-
+tributed if (1) it is offered only in its original unmodified form, and (2) no
+charge is made (beyond any actual cost of redistribution).
+
+
+
+      ================================================================
+
+
+
+This file contains patches that will allow your TRS-80 Model 4P to boot LS-DOS
+6.3.1 directly from a hard disk.  Your system must meet all of the requirements
+below.
+
+This is version 2 of HDBOOT.  Improvements since version 1 include:
+    1) Hard drives where one logical cylinder is more than one physical track
+are now supported.
+    2) Many gate-array machines would hang unless a disk was in floppy drive :0
+during boot.  This has been fixed.
+    3) A conflict with Michel Houde's XLR8er patches has been eliminated.
+    4) The bootstrap step rate byte is no longer used.
+Also, the system information sector on :0 is not altered, which eliminates
+conflicts with other programs that use this information.
+
+NOTICE: Changing any operating system, especially at this level, is a dangerous
+operation.  If anything in this file is not absolutely clear to you, do NOT
+attempt any modifications by yourself.
+        The method in this file appears to work as described.  However, I do
+not accept responsibility for any consequences of using the information in this
+file, and any modifications to your system must be made at your own risk.
+
+
+
+      ================================================================
+
+
+
+                           System Requirements
+                           -------------------
+
+
+    1) TRS-80 Model 4P ONLY, not Model 4 or 4D.
+
+    2) LS-DOS 6.3.1.
+
+    3) A hard disk drive using the standard Radio Shack 8X300 or WD1010 con-
+troller board.  This includes unmodified Radio Shack 5 and 15 meg drives.
+This method might work on other drives that use a WD1000 or WD1010 controller
+and the same port configuration, but has not been tested.
+       On any hard drive used, LS-DOS logical drive :0 must lie entirely under
+the first head (head 1) on the hard drive, and begin on track (and cylinder) 0.
+
+    4) Use of Radio Shack TRSHD6 or Misosys RSHARD6 hard disk drivers when
+running LS-DOS 6.3.1.  Other drivers have not been tested.
+
+    5) If you're using an XLR8er board and Michel Houde's patches for it, the
+patches here shouldn't affect those.  See "Instructions" step 2, below.
+
+
+
+
+
+
+
+                               Instructions
+                               ------------
+
+
+All references to drive :0 refer to the first logical (and physical) drive on
+your hard disk under LS-DOS 6.3.1
+
+    1) Print out this file.  (It's already formatted for 80 columns, 66 lines.)
+Read the entire file CAREFULLY, and make sure these instructions make perfect
+sense to you.  If they don't, ask someone.
+
+    2) Apply any other patches desired (e.g. XLR8er) to BOOT/SYS and SYS0/SYS
+on your boot diskette, following their instructions.  Make sure your system
+works correctly before attempting to use the patches here.
+
+    3) Calculate the values for "vv vv vv" through "zz zz zz..." for the
+HDBOOT/FIX patch, as explained in the table below.
+
+    4) Backup your entire hard disk onto floppies.  If there are any problems
+installing these patches, it is possible to lose some or all of the data on
+your hard disk.
+
+    5) Boot the hard disk system with your usual boot diskette.
+
+    6) Execute BACKUP SYS0/SYS:d :0 (SYS), which will move both BOOT/SYS and
+SYS0/SYS from your boot diskette to hard drive :0.  (Replace "d" with the drive
+containing your boot diskette.)
+
+    7) Use SYSGEN to create a CONFIG/SYS file on logical drive :0.
+
+    8) With a text editor or word processor, extract the two patch files below
+as HDBOOT/FIX and HDSYS0/FIX.  In the first, replace the "vv" through "zz"
+letters with the values you calculated in step 3.
+
+    9) Patch SYS0/SYS and BOOT/SYS on hard drive :0 with the commands:
+            PATCH SYS0/SYS.SYSTEM6:0 USING HDSYS0
+            PATCH BOOT/SYS.LSIDOS:0 USING HDBOOT
+
+    10) If there was an AUTO command on your boot diskette, it has been auto-
+matically transferred to drive :0.  Make sure that any programs invoked by your
+auto command are on an accessible partition of your hard disk.
+
+    11) Remove all floppy disks from the drives and press RESET.  In a few
+seconds, your system should boot directly from the hard drive.  If so, you are
+finished modifying your system.
+
+    12) If your system does not boot properly, reboot with your boot diskette
+(hold down <F2> while pressing RESET), and restore SYS0/SYS and BOOT/SYS on the
+hard disk (see step 13).  You may either abandon the entire project, or attempt
+it again.
+
+    13) To remove the hard disk boot modifications, BACKUP SYS0/SYS:d :0 (SYS),
+
+where "d" is a drive containing a copy of your LS-DOS 6.3.1 master disk.  Of
+course, you'll need to use your boot diskette and hold down the <F2> key to
+start up the hard disk after that.
+
+
+
+
+
+
+
+
+
+
+
+                                  Notes
+                                  -----
+
+
+When using the modifications in this file, a few restrictions apply.
+
+    1) The system will attempt to boot from the hard drive if it is turned on.
+To boot from a floppy (Model III mode, for example), hold down the <F2> key
+while pressing RESET.
+
+    2) When booting, if the hard drive is not completely up to speed you may
+see "The floppy disk drive is not ready."  Press RESET, and the system should
+boot properly.
+       Also, if you have an XLR8er speedup board installed, due to its slow
+startup speed the system may not always boot on the first try.  Again, press
+RESET, and the system should boot properly.
+
+    3) The CONFIG/SYS file must be loaded when booting from the hard drive,
+and cannot be suppressed.  If it cannot be loaded, the system will not boot.
+In that case, you must boot with the boot diskette, and use SYSGEN to create a
+valid CONFIG/SYS file on the hard disk's drive :0
+       You may change your system configuration at any time, as long as it
+meets the requirements above.  Merely boot the system from the hard drive,
+establish the new configuration, and re-SYSGEN.  Save a copy of this new
+configuration file on your boot diskette with SYSGEN (DRIVE=d).
+
+    4) When booting from the hard drive, you cannot enter DEBUG by holding down
+the <D> key, as this would prevent CONFIG/SYS from being loaded.  To enter
+DEBUG in this manner, boot from a floppy.
+
+       Of course, once you are at the "LS-DOS Ready" prompt, DEBUG may be used
+as desired.
+
+    5) An AUTO command may be installed on the hard disk's drive :0.  To fix a
+runaway AUTO command, reboot with your boot diskette.
+
+    6) Do not move the modified SYS0/SYS from hard drive :0 onto a floppy
+diskette.  SYS0/SYS and BOOT/SYS have been modified for hard drive boot, and
+the diskette will be unusable for booting either a floppy or hard disk system.
+
+
+
+      ================================================================
+
+
+
+For "vv vv vv," "ww," "xx," "yy," and "zz zz zz...," substitute the appropriate
+values for drive :0 of your hard disk system.
+
+vv vv vv = If each logical cylinder is the same as one physical track,
+        then use 00 00 00.
+           If each logical cylinder consists of more than one physical track,
+        then use CD F7 43.
+ww = Sectors per physical track, in hexadecimal.
+        For example, sixty-four sectors per physical track would be 40 hex.
+xx = Sectors per logical cylinder, in hexadecimal.
+        For example, thirty-two sectors per logical cylinder would be 20 hex.
+yy = Sectors per granule, in hexadecimal.
+        For example, sixteen sectors per granule would be 10 hex.
+zz zz zz... = values of DCT+3 through DCT+8 for hard disk drive :0.
+        Boot the hard disk system with your boot diskette.  From the "LS-DOS
+        Ready" prompt, use DEBUG to get the values in X'0473' through X'0478'.
+
+
+
+
+      ================================================================
+
+.HDBOOT/FIX v2.03 -- Patch to BOOT/SYS for 4P HD boot -- A. Rubin
+.Usage: PATCH BOOT/SYS.LSIDOS:0 USING HDBOOT
+.Fill in the values for "vv"..."zz" as explained above
+.
+D00,4D=xx 00 00 00 00 00 00 00
+F00,4D=12 FD CB 04 6E 28 01 87
+.
+D00,5A=yy
+F00,5A=06
+D00,9F=C0 43
+F00,9F=70 04
+D01,41=18 0D E5 21 A0 43 11 71 04 01 08 00 ED B0 C9
+F01,41=1E 00 CD 74 43 3A CD 12 E6 20 21 74 04 B6 77
+D01,6F=21 38 02 18 CF
+F01,6F=C3 38 02 00 00
+D01,7C=C0 43 E1 C1 00 00
+F01,7C=96 43 E1 C1 E6 1C
+.
+D01,9E=41 52 A8 43 zz zz zz zz zz zz 3E 09 90 20 10 F3 CD C0
+F01,9E=ED 51 CD D9 43 DB F0 CB 47 20 FA 7B D3 F2 3E 81 D3 F4
+D01,B0=43 FB 3E 05 C0 3A 79 04 92 3E 06 28 01 AF A7 C9
+F01,B0=D5 11 02 C1 3E 80 CD D9 43 3E C0 D3 E4 DB F0 A3
+.
+D01,C0=E5 D5 3E 85 D3 84 D3 9C 4B 5A 16 00 79 vv vv vv
+F01,C0=28 FB ED A2 7A D3 F4 ED A2 20 FA 18 FE D1 D1 AF
+D01,D0=06 0C 3E 02 CF F5 3E 86 D3 9C D3 84 F1 D1 E1
+F01,D0=D3 E4 3E 81 D3 F4 DB F0 C9 D3 F0 06 18 10 FE
+.
+D01,F5=02 03 EB 29 EB D6 ww D8 4F 13 C9
+F01,F5=00 00 00 00 00 00 00 00 00 00 00
+.End of HDBOOT/FIX patch
+
+      ================================================================
+
+.HDSYS0/FIX v2.03 -- Patch to SYS0/SYS for 4P HD boot -- A. Rubin
+.Usage: PATCH SYS0/SYS.LSIDOS:0 USING HDSYS0
+D0C,B9=00 00 00
+F0C,B9=31 80 03
+D0D,0A=00 00 00 00 00 00 00 00 00 00 00 3E D0 D3 F0 06 80 10 FE
+F0D,0A=3A 9D 43 E6 03 47 21 73 04 7E E6 FC B0 77 DB F1 32 75 04
+D0E,A6=00 00 00
+F0E,A6=C2 A0 19
+D0E,E8=00
+F0E,E8=C0
+D0F,1A=FE
+F0F,1A=0C
+.End of HDSYS0/FIX patch
+
+      ================================================================
+
+Questions or comments about this file can be sent to Adam Rubin, CompuServe ID
+71320,1052, preferably as a message in the LDOS Forum.
+
+This project could not have been completed without the help of Gary Phillips,
+Bob Haynes, Pete Granzeau, and numerous other members of CompuServe's LDOS
+Forum.
+
+TRS-80 is a registered trademark of Radio Shack.
+LS-DOS is a trademark of Logical Systems, Inc.
+
+End of file HDBT2/TXT.
+

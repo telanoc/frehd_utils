@@ -1,0 +1,694 @@
+   1:			;
+   2:			; fsetboot.z80
+   3:			;
+   4:			; Copyright 2023, Pete Cervasio <cervasio@airmail.net>
+   5:			; Copyright Timothy Mann, 1997 and Frederic Vecoven, 2013
+   6:			;
+   7:			; This software may be copied, modified, and used for any
+   8:			; purpose without fee, provided that (1) the above copyright
+   9:			; notice is retained, and (2) modified versions are clearly
+  10:			; marked as having been modified, with the modifier's name and
+  11:			; the date included.  
+  12:			;
+  13:			; A program for FreHD based systems to turn on or off the flag
+  14:			; in a hard disk image file which marks it as bootable (and to
+  15:			; show up in the FreHD menu).  In my testing, a hard disk would
+  16:			; only boot if its drive :0 was set up with 203 cylinders or
+  17:			; fewer.  It also had to use only one head.  Drives :1 and up 
+  18:			; could be set as 406 cylinders and more heads, but I was not
+  19:			; able to boot from a disk set up that way.
+  20:			;
+  21:			; Many chunks were pulled from the 'import2' utility source
+  22:			; because that program was already set up to run on the
+  23:			; various Model 1, III and 4 systems.  This does no DOS calls
+  24:			; other than to display information and exit so it should 
+  25:			; "just work" on them.
+  26:			;
+  27:			; Usage: 
+  28:			; =====
+  29:			;
+  30:			; 1) Get the name of the hard disk image from Frehd with
+  31:			;
+  32:			;    vhdutl (dir)
+  33:			;
+  34:			; 2) Set byte 8 of the hard disk header to 1 by
+  35:			;
+  36:			;    fsetboot frehd_filename
+  37:			;
+  38:			;    To turn the boot flag off, use:
+  39:			;
+  40:			;    fsetboot -n frehd_filename
+  41:			;
+  42:			;---------------------------------------------------------------
+  43:			;
+  44:			
+  45:			;; Interface defines
+  46:	00C2          	DATA2		equ	0c2h
+  47:	00C3          	SIZE2		equ	0c3h
+  48:	00C4          	COMMAND2	equ	0c4h
+  49:	00C5          	ERROR2		equ	0c5h
+  50:	00CF          	STATUS		equ	0cfh
+  51:			
+  52:			;; FreHD commands we use
+  53:	0003          	OPENFILE	equ	03h
+  54:	0004          	READFILE	equ	04h
+  55:	0005          	WRITEFILE	equ	05h
+  56:	0006          	CLOSEFILE	equ	06h
+  57:	000B          	SEEKFILE	equ	0bh
+  58:			
+  59:			;; FatFS flags
+  60:	0000          	FA_OPEN_EXISTING equ	00h
+  61:	0001          	FA_READ		 equ	01h
+  62:	0002          	FA_WRITE	 equ	02h
+  63:	0004          	FA_CREATE_NEW	 equ	04h
+  64:	0008          	FA_CREATE_ALWAYS equ	08h
+  65:	0010          	FA_OPEN_ALWAYS	 equ	10h
+  66:			
+  67:			;; Misc
+  68:	000A          	LF		equ	10
+  69:	000D          	CR		equ	13
+  70:	0003          	ETX		equ	3
+  71:			
+  72:	0056          	REED_SIG1	equ	56h
+  73:	00CB          	REED_SIG2	equ	0cbh
+  74:			
+  75:			;; Model I/III addresses
+  76:	4409          	@error		equ	4409h
+  77:	402D          	@exit		equ	402dh
+  78:	4030          	@abort		equ	4030h	    
+  79:	001B          	@put		equ	001bh
+  80:	401D          	dodcb$		equ	401dh
+  81:			
+  82:			;; Model 4 SVCs
+  83:	0028          	@svc		equ	40  ; rst address for SVCs
+  84:	001A          	@error6		equ	26
+  85:	0016          	@exit6		equ	22
+  86:	0015          	@abort6		equ	21
+  87:	000A          	@dsply6		equ	10
+  88:			
+  89:	5200          		org	5200h
+  90:			
+  91:			;;
+  92:			;; Jump tables for OS independence
+  93:			;;
+  94:	5200          	startj:
+  95:	5200  CD0944  	error:	call @error
+  96:	5203  C9      		ret
+  97:	5204  CD2D40  	exit:	call @exit
+  98:	5207  C9      		ret
+  99:	5208  CD3040  	abort:	call @abort
+ 100:	520B  C9      		ret
+ 101:	520C  CD3C53  	dsply:	call dsply5
+ 102:	520F  C9      		ret
+ 103:	5210          	endj:
+ 104:			
+ 105:			;; Model 4 jump table
+ 106:	5210          	startj6:
+ 107:	5210  3E1A    		ld a, @error6
+ 108:	5212  EF      		rst @svc
+ 109:	5213  C9      		ret
+ 110:	5214  3E16    		ld a, @exit6
+ 111:	5216  EF      		rst @svc
+ 112:	5217  C9      		ret
+ 113:	5218  3E15    		ld a, @abort6
+ 114:	521A  EF      		rst @svc
+ 115:	521B  C9      		ret
+ 116:	521C  3E0A    		ld a, @dsply6
+ 117:	521E  EF      		rst @svc
+ 118:	521F  C9      		ret
+ 119:			;
+ 120:			;	Program start location
+ 121:			;
+ 122:	5220          	start:	
+ 123:	5220  3A0A00  		ld a, (000ah)		; Model 4?
+ 124:	5223  FE40    		cp 40h
+ 125:	5225  280D    		jr z, not4
+ 126:	5227  E5      		push hl
+ 127:	5228  110052  		ld de, startj
+ 128:	522B  211052  		ld hl, startj6
+ 129:	522E  011000  		ld bc, endj - startj
+ 130:	5231  EDB0    		ldir
+ 131:	5233  E1      		pop hl
+ 132:	5234          	not4:
+ 133:	5234  7E      	flag0:	ld a, (hl)		; look for flags
+ 134:	5235  FE20    		cp ' '
+ 135:	5237  DA5352  		jp c, usage		; error if line ends here
+ 136:	523A  2003    		jr nz, flag1
+ 137:	523C  23      		inc hl
+ 138:	523D  18F5    		jr flag0
+ 139:	523F  FE2D    	flag1:	cp '-'
+ 140:	5241  201C    		jr nz, setbt
+ 141:	5243  23      		inc hl
+ 142:	5244  7E      		ld a, (hl)
+ 143:	5245  F620    		or 20h			; Force to lowercase
+ 144:	5247  FE6E    		cp 'n'			; The only option we allow
+ 145:	5249  2008    		jr nz, usage
+ 146:	524B  23      		inc hl
+ 147:	524C  3E00    		ld a, 0
+ 148:	524E  32A153  		ld (bootval), a
+ 149:	5251  18E1    		jr flag0
+ 150:			
+ 151:	5253  211554  	usage:	ld hl, usemsg
+ 152:	5256  CD0C52  		call  dsply
+ 153:	5259  210100  		ld hl, 1
+ 154:	525C  C30452  		jp exit
+ 155:			;
+ 156:			;
+ 157:			;
+ 158:	525F  22A253  	setbt:	ld (hdname), hl		; Save pointer to name
+ 159:	5262  118956  		ld de, secbuf+1
+ 160:	5265  3E20    		ld a, ' '
+ 161:	5267  BE      	setb1	cp (hl)			; Put filename into secbuf
+ 162:	5268  EDA0    		ldi
+ 163:	526A  38FB    		jr c,setb1
+ 164:	526C  1B      		dec de			; nul terminate it
+ 165:	526D  97      		sub a
+ 166:	526E  12      		ld (de), a
+ 167:			;
+ 168:			; Greet user and say what we're going try to do
+ 169:			;
+ 170:	526F  21A453  		ld hl, welcmsg
+ 171:	5272  CD0C52  		call dsply
+ 172:	5275  3AA153  		ld a, (bootval)
+ 173:	5278  B7      		or a
+ 174:	5279  2805    		jr z, clearit
+ 175:	527B  214054  		ld hl, setm
+ 176:	527E  1803    		jr cont
+ 177:	5280  213754  	clearit ld hl, clrm
+ 178:	5283  CD0C52  	cont	call dsply
+ 179:	5286  214854  		ld hl, bfmsg
+ 180:	5289  CD0C52  		call dsply
+ 181:	528C  2AA253  		ld hl, (hdname)
+ 182:	528F  CD0C52  		call dsply
+ 183:			;
+ 184:			; set up to open the file
+ 185:			;
+ 186:	5292  218956  		ld hl,secbuf+1
+ 187:	5295  0602    		ld b, 2			; length = 2 (flag + null-terminator)
+ 188:	5297  3E00    		ld a, 0			; null-terminator
+ 189:	5299  BE      	stlen1:	cp (hl)
+ 190:	529A  2804    		jr z, stlen2
+ 191:	529C  04      		inc b			; found a character
+ 192:	529D  23      		inc hl
+ 193:	529E  18F9    		jr stlen1
+ 194:			;
+ 195:			; open the disk image
+ 196:			;
+ 197:	52A0  3E03    	stlen2:	ld a, OPENFILE
+ 198:	52A2  D3C4    		out (COMMAND2), a	; send OPENFILE command
+ 199:	52A4  CD5153  		call wait
+ 200:	52A7  78      		ld a, b
+ 201:	52A8  D3C3    		out (SIZE2), a		; send SIZE2
+ 202:	52AA  0EC2    		ld c, DATA2
+ 203:	52AC  218856  		ld hl, secbuf
+ 204:	52AF  3603    		ld (hl), FA_OPEN_EXISTING|FA_READ|FA_WRITE
+ 205:	52B1  EDB3    		otir
+ 206:	52B3  CD5153  		call wait		; Won't return if there's an error
+ 207:			;
+ 208:			; Read the header into secbuf
+ 209:			;
+ 210:	52B6  218856  		ld hl,secbuf
+ 211:	52B9  3E20    		ld a,32
+ 212:	52BB  D3C3    		out (SIZE2),a		; request 32 bytes
+ 213:			
+ 214:	52BD  3E04    		ld a, READFILE
+ 215:	52BF  D3C4    		out (COMMAND2), a	; read
+ 216:	52C1  CD5153  		call wait
+ 217:				
+ 218:	52C4  010000  		ld bc, 0000h
+ 219:	52C7  DBCF    		in a, (STATUS)		; get status. DRQ set means we read something
+ 220:	52C9  E608    		and 08h
+ 221:	52CB  2808    		jr z, readok
+ 222:	52CD  DBC3    		in a, (SIZE2)
+ 223:	52CF  4F      		ld c, a
+ 224:	52D0  B7      		or a
+ 225:	52D1  2002    		jr nz, readok
+ 226:	52D3  0601    		ld b, 1
+ 227:	52D5          	readok:	
+ 228:	52D5  41      		ld b,c
+ 229:	52D6  0EC2    		ld c, DATA2
+ 230:	52D8  218856  		ld hl, secbuf
+ 231:	52DB  EDB2    		inir			; read buffer from interface
+ 232:			;
+ 233:			; Make sure this is really a Reed hard disk image
+ 234:			;
+ 235:	52DD  3A8856  		ld a, (secbuf)		; Check for the Reed header signature
+ 236:	52E0  FE56    		cp REED_SIG1
+ 237:	52E2  C29853  		jp nz,notreed
+ 238:	52E5  3A8956  		ld a, (secbuf+1)
+ 239:	52E8  FECB    		cp REED_SIG2
+ 240:	52EA  C29853  		jp nz,notreed
+ 241:			
+ 242:			;
+ 243:			; Is the boot flag what we expected?
+ 244:			;
+ 245:	52ED  219056  		ld hl,secbuf+8		; point to byte 8 in the header
+ 246:	52F0  3AA153  		ld a,(bootval)		; Get our desired boot value
+ 247:	52F3  BE      		cp (hl)			; Is it alreedy set that way?
+ 248:	52F4  283A    		jr z,already
+ 249:	52F6  77      		ld (hl),a		; Set the value in the header
+ 250:			;
+ 251:			; Seek to offset 0 in the header
+ 252:			;
+ 253:	52F7  3E0B    		ld a,SEEKFILE
+ 254:	52F9  D3C4    		out (COMMAND2),a
+ 255:	52FB  CD5153  		call wait
+ 256:	52FE  AF      		xor a
+ 257:	52FF  0604    		ld b,4
+ 258:	5301  D3C2    	seeklp	out (DATA2),a		; DWORD zero
+ 259:	5303  10FC    		djnz seeklp
+ 260:	5305  CD5153  		call wait
+ 261:			;
+ 262:			; and write it back out
+ 263:			;
+ 264:	5308  010000  		ld bc,0
+ 265:	530B  3E05    		ld a, WRITEFILE		; send write command
+ 266:	530D  D3C4    		out (COMMAND2), a
+ 267:	530F  CD5153  		call wait
+ 268:	5312  3E20    		ld a,32			; send size to interface
+ 269:	5314  D3C3    		out (SIZE2), a
+ 270:	5316  47      		ld b, a
+ 271:	5317  0EC2    		ld c, DATA2
+ 272:	5319  218856  		ld hl, secbuf
+ 273:	531C  EDB3    		otir			; send data
+ 274:	531E  CD5153  		call wait		; wait until it's written
+ 275:			
+ 276:	5321  21BE54  		ld hl,itsdone
+ 277:	5324  CD0C52  		call dsply
+ 278:			;
+ 279:			; Now close the file
+ 280:			;
+ 281:	5327          	closit:
+ 282:	5327  3E06    		ld a, CLOSEFILE		; send close file
+ 283:	5329  D3C4    		out (COMMAND2), a
+ 284:	532B  CD5153  		call wait
+ 285:	532E  1806    		jr getout
+ 286:			
+ 287:	5330  218554  	already ld hl,itsthat
+ 288:	5333  CD0C52  		call dsply
+ 289:			
+ 290:	5336  210000  	getout: ld  hl,0
+ 291:	5339  C30452  		jp exit
+ 292:			
+ 293:			;
+ 294:			; Display message in HL.  03h terminate, 0dh newline and terminate.
+ 295:			;
+ 296:	533C  111D40  	dsply5:	ld de, dodcb$
+ 297:	533F  E5      		push hl
+ 298:	5340  7E      	dsply0:	ld a, (hl)
+ 299:	5341  FE03    		cp 03h
+ 300:	5343  280A    		jr z, dsply1
+ 301:	5345  F5      		push af
+ 302:	5346  CD1B00  		call @put
+ 303:	5349  F1      		pop af
+ 304:	534A  23      		inc hl
+ 305:	534B  FE0D    		cp 0dh
+ 306:	534D  20F1    		jr nz, dsply0
+ 307:	534F  E1      	dsply1:	pop hl
+ 308:	5350  C9      		ret
+ 309:			;
+ 310:			; wait until the interface is ready
+ 311:			;
+ 312:	5351  E3      	wait:	ex (sp),hl
+ 313:	5352  E3      		ex (sp),hl			; small delay to settle the controller
+ 314:	5353  DBCF    	wait1:	in a, (STATUS)
+ 315:	5355  07      		rlca
+ 316:	5356  38FB    		jr c, wait1
+ 317:	5358  DBCF    		in a, (STATUS)			; read status again
+ 318:	535A  E601    		and 01h				; nz = error
+ 319:	535C  2001    		jr nz, uerror
+ 320:	535E  C9      		ret
+ 321:			;
+ 322:			; interface error
+ 323:			;
+ 324:	535F  210E55  	uerror: ld hl, error_m		; display error prefix
+ 325:	5362  CD0C52  		call dsply
+ 326:	5365  DBC5    		in a, (ERROR2)		; get error number
+ 327:	5367  FE15    		cp 15h			; check error number.
+ 328:	5369  381B    		jr c, uerrok
+ 329:	536B  212455  		ld hl,ue1		; Convert error code to hex for
+ 330:	536E  47      		ld b,a			; display, in case it's helpful.
+ 331:	536F  1F      		rra
+ 332:	5370  1F      		rra
+ 333:	5371  1F      		rra
+ 334:	5372  1F      		rra
+ 335:	5373  E60F    		and 0fh
+ 336:	5375  FE0A    		cp  0ah
+ 337:	5377  DE69    		sbc a,69h
+ 338:	5379  27      		daa
+ 339:	537A  77      		ld (hl),a
+ 340:	537B  23      		inc hl
+ 341:	537C  78      		ld a,b
+ 342:	537D  E60F    		and 0fh
+ 343:	537F  FE0A    		cp 0ah
+ 344:	5381  DE69    		sbc a,69h
+ 345:	5383  27      		daa
+ 346:	5384  77      		ld (hl),a
+ 347:	5385  97      		sub a			; A=0 unknown error 
+ 348:	5386  6F      	uerrok:	ld l, a
+ 349:	5387  2600    		ld h, 00h
+ 350:	5389  29      		add hl, hl		; pointers are 2 bytes
+ 351:	538A  115E56  		ld de, error_table
+ 352:	538D  19      		add hl, de		; hl points to the pointer
+ 353:	538E  7E      		ld a, (hl)
+ 354:	538F  23      		inc hl
+ 355:	5390  66      		ld h, (hl)
+ 356:	5391  6F      		ld l, a			; hl points to the string
+ 357:	5392  CD0C52  		call dsply
+ 358:	5395  C30852  		jp abort
+ 359:			;
+ 360:			; Not a reed hard disk image
+ 361:			;
+ 362:	5398          	notreed:
+ 363:	5398  21DB54  		ld hl, notreedmsg
+ 364:	539B  CD0C52  		call dsply
+ 365:	539E  C32753  		jp closit
+ 366:			;
+ 367:			; Data
+ 368:			;
+ 369:	53A1  01      	bootval	db	1		; Value to set in the header
+ 370:	53A2  0000    	hdname	dw 0
+ 371:			;
+ 372:			; Messages
+ 373:			;
+ 374:	53A4  66736574	welcmsg db	"fsetboot - Set or clear bootable flag of FreHD disk images",CR
+	      626F6F74
+	      202D2053
+	      6574206F
+	      7220636C
+	      65617220
+	      626F6F74
+	      61626C65
+	      20666C61
+	      67206F66
+	      20467265
+	      48442064
+	      69736B20
+	      696D6167
+	      65730D
+ 375:	53DF  436F7079		db	"Copyright 2023, Pete Cervasio <cervasio@airmail.net>",LF,CR
+	      72696768
+	      74203230
+	      32332C20
+	      50657465
+	      20436572
+	      76617369
+	      6F203C63
+	      65727661
+	      73696F40
+	      6169726D
+	      61696C2E
+	      6E65743E
+	      0A0D
+ 376:	5415  55736167	usemsg	db	"Usage: fsetboot [-n] diskimg.name",CR
+	      653A2066
+	      73657462
+	      6F6F7420
+	      5B2D6E5D
+	      20646973
+	      6B696D67
+	      2E6E616D
+	      650D
+ 377:	5437  436C6561	clrm	db	"Clearing",ETX
+	      72696E67
+	      03
+ 378:	5440  53657474	setm	db	"Setting",ETX
+	      696E6703
+ 379:	5448  20626F6F	bfmsg	db	" boot flag of ",ETX
+	      7420666C
+	      6167206F
+	      662003
+ 380:	5457  426F6F74	issetm	db	"Boot flag already set",CR
+	      20666C61
+	      6720616C
+	      72656164
+	      79207365
+	      740D
+ 381:	546D  426F6F74	isclrm	db	"Boot flag already clear",CR
+	      20666C61
+	      6720616C
+	      72656164
+	      7920636C
+	      6561720D
+ 382:	5485  4E4F5445	itsthat db	"NOTE: The header is already set that way.  Nothing done.",CR
+	      3A205468
+	      65206865
+	      61646572
+	      20697320
+	      616C7265
+	      61647920
+	      73657420
+	      74686174
+	      20776179
+	      2E20204E
+	      6F746869
+	      6E672064
+	      6F6E652E
+	      0D
+ 383:	54BE  54686520	itsdone db	"The header has been changed.",CR
+	      68656164
+	      65722068
+	      61732062
+	      65656E20
+	      6368616E
+	      6765642E
+	      0D
+ 384:	54DB  54686174	notreedmsg db	"That file does not appear to be a hard disk image!",CR
+	      2066696C
+	      6520646F
+	      6573206E
+	      6F742061
+	      70706561
+	      7220746F
+	      20626520
+	      61206861
+	      72642064
+	      69736B20
+	      696D6167
+	      65210D
+ 385:			
+ 386:			;
+ 387:			; FreHD error messages
+ 388:			;
+ 389:	550E  4572726F	error_m:		defb 'Error: ', 03h
+	      723A2003
+ 390:	5516  556E6B6E	fr_unknown:		defb 'Unknown error '			; 0
+	      6F776E20
+	      6572726F
+	      7220
+ 391:	5524  3030480D	ue1			defb '00H',CR
+ 392:	5528  4469736B	fr_disk_err:		defb 'Disk error', 0dh			; 1
+	      20657272
+	      6F720D
+ 393:	5533  496E7465	fr_int_err:		defb 'Internal error', 0dh		; 2
+	      726E616C
+	      20657272
+	      6F720D
+ 394:	5542  44726976	fr_not_ready:		defb 'Drive not ready', 0dh		; 3
+	      65206E6F
+	      74207265
+	      6164790D
+ 395:	5552  46696C65	fr_no_file:		defb 'File not found', 0dh		; 4
+	      206E6F74
+	      20666F75
+	      6E640D
+ 396:	5561  50617468	fr_no_path:		defb 'Path not found', 0dh		; 5
+	      206E6F74
+	      20666F75
+	      6E640D
+ 397:	5570  496E7661	fr_invalid_name:	defb 'Invalid pathname', 0dh		; 6
+	      6C696420
+	      70617468
+	      6E616D65
+	      0D
+ 398:	5581  41636365	fr_denied:		defb 'Access denied', 0dh		; 7
+	      73732064
+	      656E6965
+	      640D
+ 399:	558F  46696C65	fr_exist:		defb 'File exists', 0dh			; 8
+	      20657869
+	      7374730D
+ 400:	559B  46696C65	fr_invalid_obj:		defb 'File/dir object invalid', 0dh	; 9
+	      2F646972
+	      206F626A
+	      65637420
+	      696E7661
+	      6C69640D
+ 401:	55B3  57726974	fr_write_protected:	defb 'Write protected', 0dh		; 10
+	      65207072
+	      6F746563
+	      7465640D
+ 402:	55C3  496E7661	fr_invalid_drive:	defb 'Invalid drive', 0dh		; 11
+	      6C696420
+	      64726976
+	      650D
+ 403:	55D1  566F6C75	fr_not_enabled:		defb 'Volume not mounted', 0dh		; 12
+	      6D65206E
+	      6F74206D
+	      6F756E74
+	      65640D
+ 404:	55E4  4E6F2046	fr_no_fs:		defb 'No FAT fs found', 0dh		; 13
+	      41542066
+	      7320666F
+	      756E640D
+ 405:	55F4  6D6B6673	fr_mkfs_aborted:	defb 'mkfs aborted', 0dh		; 14
+	      2061626F
+	      72746564
+	      0D
+ 406:	5601  54696D65	fr_timeout:		defb 'Timeout detected', 0dh		; 15
+	      6F757420
+	      64657465
+	      63746564
+	      0D
+ 407:	5612  46696C65	fr_locked:		defb 'File locked', 0dh			; 16
+	      206C6F63
+	      6B65640D
+ 408:	561E  4E6F7420	fr_not_enough_core:	defb 'Not enough core', 0dh		; 17
+	      656E6F75
+	      67682063
+	      6F72650D
+ 409:	562E  546F6F20	fr_too_many_open_files:	defb 'Too many open files', 0dh		; 18
+	      6D616E79
+	      206F7065
+	      6E206669
+	      6C65730D
+ 410:	5642  496E7661	fr_invalid_param:	defb 'Invalid parameter', 0dh		; 19
+	      6C696420
+	      70617261
+	      6D657465
+	      720D
+ 411:	5654  4469736B	fr_disk_full:		defb 'Disk full', 0dh			; 20
+	      2066756C
+	      6C0D
+ 412:			
+ 413:	565E          	error_table:
+ 414:	565E  16552855		dw	fr_unknown, fr_disk_err, fr_int_err, fr_not_ready
+	      33554255
+ 415:	5666  52556155		dw	fr_no_file, fr_no_path,	fr_invalid_name, fr_denied 
+	      70558155
+ 416:	566E  8F559B55		dw	fr_exist, fr_invalid_obj, fr_write_protected, fr_invalid_drive
+	      B355C355
+ 417:	5676  D155E455		dw	fr_not_enabled, fr_no_fs, fr_mkfs_aborted, fr_timeout
+	      F4550156
+ 418:	567E  12561E56		dw	fr_locked, fr_not_enough_core, fr_too_many_open_files
+	      2E56
+ 419:	5684  42565456		dw	fr_invalid_param, fr_disk_full
+ 420:			
+ 421:			
+ 422:			
+ 423:	5688 ..5787 00	secbuf	ds	256,0
+ 424:			
+ 425:	5220          		end start
+
+
+
+Statistics:
+
+     4	passes
+     0	jr promotions
+    99	symbols
+  1416	bytes
+
+
+
+Symbol Table:
+
+@abort         =4030      16432
+@abort6        =15        21
+@dsply6        =0A        10
+@error         =4409      17417
+@error6        =1A        26
+@exit          =402D      16429
+@exit6         =16        22
+@put           =1B        27
+@svc           =28        40
+CLOSEFILE      =06        6
+COMMAND2       =C4        196
+CR             =0D        13
+DATA2          =C2        194
+ERROR2         =C5        197
+ETX            =03        3
+FA_CREATE_ALWAYS=08        8
+FA_CREATE_NEW  =04        4
+FA_OPEN_ALWAYS =10        16
+FA_OPEN_EXISTING=00        0
+FA_READ        =01        1
+FA_WRITE       =02        2
+LF             =0A        10
+OPENFILE       =03        3
+READFILE       =04        4
+REED_SIG1      =56        86
+REED_SIG2      =CB        203
+SEEKFILE       =0B        11
+SIZE2          =C3        195
+STATUS         =CF        207
+WRITEFILE      =05        5
+abort           5208      21000
+already         5330      21296
+bfmsg           5448      21576
+bootval         53A1      21409
+clearit         5280      21120
+closit          5327      21287
+clrm            5437      21559
+cont            5283      21123
+dodcb$         =401D      16413
+dsply           520C      21004
+dsply0          5340      21312
+dsply1          534F      21327
+dsply5          533C      21308
+endj            5210      21008
+error           5200      20992
+error_m         550E      21774
+error_table     565E      22110
+exit            5204      20996
+flag0           5234      21044
+flag1           523F      21055
+fr_denied       5581      21889
+fr_disk_err     5528      21800
+fr_disk_full    5654      22100
+fr_exist        558F      21903
+fr_int_err      5533      21811
+fr_invalid_drive 55C3      21955
+fr_invalid_name 5570      21872
+fr_invalid_obj  559B      21915
+fr_invalid_param 5642      22082
+fr_locked       5612      22034
+fr_mkfs_aborted 55F4      22004
+fr_no_file      5552      21842
+fr_no_fs        55E4      21988
+fr_no_path      5561      21857
+fr_not_enabled  55D1      21969
+fr_not_enough_core 561E      22046
+fr_not_ready    5542      21826
+fr_timeout      5601      22017
+fr_too_many_open_files 562E      22062
+fr_unknown      5516      21782
+fr_write_protected 55B3      21939
+getout          5336      21302
+hdname          53A2      21410
+isclrm          546D      21613
+issetm          5457      21591
+itsdone         54BE      21694
+itsthat         5485      21637
+not4            5234      21044
+notreed         5398      21400
+notreedmsg      54DB      21723
+readok          52D5      21205
+secbuf          5688      22152
+seeklp          5301      21249
+setb1           5267      21095
+setbt           525F      21087
+setm            5440      21568
+start           5220      21024
+startj          5200      20992
+startj6         5210      21008
+stlen1          5299      21145
+stlen2          52A0      21152
+ue1             5524      21796
+uerrok          5386      21382
+uerror          535F      21343
+usage           5253      21075
+usemsg          5415      21525
+wait            5351      21329
+wait1           5353      21331
+welcmsg         53A4      21412

@@ -1,0 +1,37 @@
+README for Pete's FreHD Utilities
+14 March 2023 (Happy Pi Day)
+
+This software may be copied, modified, and used for any purpose
+without fee, provided that (1) the above copyright notice is
+retained, and (2) modified versions are clearly marked as having
+been modified, with the modifier's name and the date included.
+
+This repository will contain my utilities for use with Frederic 
+Vecoven's FreHD hard disk emulator for TRS-80 machines.
+
+fsetboot.cmd - Set or clear the bootable flag of a hard disk
+image on the FreHD.  This program currently (12 March 2023)
+doesn't work on trs80gp's FreHD emulation.
+
+fsetboot.asm - Source code
+fsetboot.lst - Latest assembly listing
+
+hdbt2.txt - A. Rubin's original text and patches on booting a 4P
+from hard disk.  I haven't found this in too many other places
+so this seems like a good place for people to find it.
+
+hdbt2.bas - My program to write the patch files with the data
+values filled in automatically with data from the current drive
+:0.  This is so much easier than manually doing it.
+
+mkhdboot.bas - A program to write out a FreHD hard disk header
+(which can be mounted later and formatted).  The header values
+for size and whatnot are easily edited, with defaults for a 406
+cylinder drive with 8 heads.
+
+Note: If you are using the FreHD menu to boot your hard disk, it
+seems that you have to use only a single head for your drive :0 
+partition.  You also need to avoid creating your drive :0 disk
+with more than 203 cylinders.  1 physical per logical cylinder
+is all I could make boot.
+
