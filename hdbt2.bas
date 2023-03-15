@@ -15,8 +15,7 @@
 140 PRINT "xx = "; RIGHT$("0" + HEX$(XX), 2)
 150 PRINT "yy = "; RIGHT$("0" + HEX$(YY), 2)
 160 PRINT "zz ="; ZZ$
-
-169 end
+169 rem end : rem In case I just want to see the values
 170 OPEN "o",1,"hdboot/fix:0"
 180 PRINT #1, ".HDBOOT/FIX v2.03 -- Patch to BOOT/SYS for 4P HD boot -- A. Rubin"
 190 PRINT #1, ".Usage: PATCH BOOT/SYS.LSIDOS:0 USING HDBOOT"
