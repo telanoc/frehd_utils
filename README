@@ -35,3 +35,8 @@ partition.  You also need to avoid creating your drive :0 disk
 with more than 203 cylinders.  1 physical per logical cylinder
 is all I could make boot.
 
+22 March 2023: In mkhdboot.bas I fixed the OS type value (offset 
+0x0b) in the hard disk header.  The program now asks you what OS
+you'll be using, and sets the value accordingly.  If something
+other than LDOS/LS-DOS is selected, it won't remind you of how
+to use RSHARDx/DCT to set up your drive.
